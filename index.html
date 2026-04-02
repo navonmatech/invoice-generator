@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -7,18 +7,28 @@
 
 <!-- ════════════════════════════════════════════════════════════════
      FIREBASE AUTH  (v10 modular SDK via CDN — no build step needed)
-     ────────────────────────────────────────────────────────────────
-     HOW TO SET UP (one-time, ~5 minutes):
-       1. Go to https://console.firebase.google.com
-       2. Create a project → Add a Web App → copy the firebaseConfig object
-       3. In the Firebase console: Authentication → Sign-in method → Email/Password → Enable
-       4. Authentication → Users → Add user  (your email + password)
-       5. Paste your firebaseConfig values into the CONFIG block below
      ════════════════════════════════════════════════════════════════ -->
 <script type="module">
   import { initializeApp }                          from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
   import { getAuth, signInWithEmailAndPassword,
            signOut, onAuthStateChanged }            from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+  import { getFirestore, collection, addDoc,
+           getDocs, deleteDoc, doc,
+           query, orderBy, serverTimestamp }        from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+  /*
+   * FIRESTORE SETUP (one-time):
+   *   1. Firebase console → Firestore Database → Create database (production mode)
+   *   2. Rules tab → paste:
+   *        rules_version = '2';
+   *        service cloud.firestore {
+   *          match /databases/{database}/documents {
+   *            match /users/{uid}/invoices/{id} {
+   *              allow read, write: if request.auth != null && request.auth.uid == uid;
+   *            }
+   *          }
+   *        }
+   */
 
   const firebaseConfig = {
     apiKey:            "AIzaSyDJfbyTrNZDUVon_KEvUe0lbXHGbOpjlqc",
@@ -32,6 +42,7 @@
 
   const app  = initializeApp(firebaseConfig);
   const auth = getAuth(app);
+  const db   = getFirestore(app);
 
   /* Watch auth state — show/hide screens accordingly */
   onAuthStateChanged(auth, user => {
@@ -39,6 +50,7 @@
       document.getElementById('login-screen').style.display = 'none';
       document.getElementById('app-shell').style.display    = 'flex';
       document.getElementById('user-email').textContent     = user.email;
+      window.loadInvoicesList();
     } else {
       document.getElementById('login-screen').style.display = 'flex';
       document.getElementById('app-shell').style.display    = 'none';
@@ -80,491 +92,43 @@
 
   /* Allow pressing Enter to submit */
   window.loginKeydown = e => { if (e.key === 'Enter') window.doLogin(); };
+
+  /* ── Firestore: save current invoice ── */
+  window.saveInvoice = async (data) => {
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    await addDoc(collection(db, 'users', user.uid, 'invoices'), {
+      ...data, savedAt: serverTimestamp(),
+    });
+    await window.loadInvoicesList();
+  };
+
+  /* ── Firestore: delete invoice by id ── */
+  window.deleteInvoice = async (id) => {
+    if (!confirm('Delete this invoice?')) return;
+    const user = auth.currentUser;
+    if (!user) throw new Error('Not authenticated');
+    await deleteDoc(doc(db, 'users', user.uid, 'invoices', id));
+    await window.loadInvoicesList();
+  };
+
+  /* ── Firestore: fetch and render invoices list ── */
+  window.loadInvoicesList = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+    const snap = await getDocs(
+      query(collection(db, 'users', user.uid, 'invoices'), orderBy('savedAt', 'desc'))
+    );
+    const invoices = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (window.renderInvoicesList) window.renderInvoicesList(invoices);
+  };
 </script>
 
 <!-- PDF libraries -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 
-<style>
-/* ════════ RESET ════════ */
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-/* ════════════════════════════════════
-   LOGIN SCREEN
-════════════════════════════════════ */
-#login-screen {
-  position: fixed;
-  inset: 0;
-  background: #1a1a1a;
-  display: flex;          /* shown by default until Firebase confirms auth */
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  font-family: 'Georgia', serif;
-}
-
-.login-card {
-  background: #fff;
-  border-radius: 16px;
-  padding: 52px 48px 44px;
-  width: 100%;
-  max-width: 400px;
-  box-shadow: 0 32px 80px rgba(0,0,0,0.5);
-}
-
-.login-card .brand {
-  font-size: 10px;
-  letter-spacing: 3px;
-  text-transform: uppercase;
-  color: #bbb;
-  margin-bottom: 10px;
-  font-family: Arial, sans-serif;
-}
-
-.login-card h2 {
-  font-size: 24px;
-  font-weight: 700;
-  color: #1a1a1a;
-  margin-bottom: 8px;
-}
-
-.login-card .subtitle {
-  font-size: 13px;
-  color: #aaa;
-  margin-bottom: 36px;
-  font-family: Arial, sans-serif;
-}
-
-.login-field {
-  margin-bottom: 16px;
-}
-
-.login-field label {
-  display: block;
-  font-size: 10px;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-  color: #999;
-  margin-bottom: 6px;
-  font-family: Arial, sans-serif;
-}
-
-.login-field input {
-  width: 100%;
-  border: 1.5px solid #e4e4e4;
-  border-radius: 8px;
-  padding: 12px 14px;
-  font-size: 14px;
-  font-family: Arial, sans-serif;
-  color: #222;
-  background: #fafafa;
-  outline: none;
-  transition: border-color 0.2s, background 0.2s;
-}
-
-.login-field input:focus {
-  border-color: #7a9e75;
-  background: #fff;
-}
-
-.login-error {
-  font-size: 12.5px;
-  color: #c0392b;
-  min-height: 20px;
-  margin-bottom: 16px;
-  font-family: Arial, sans-serif;
-  background: #fff5f5;
-  border-radius: 6px;
-  padding: 0;
-  transition: padding 0.2s;
-}
-.login-error:not(:empty) {
-  padding: 10px 14px;
-  border: 1px solid #fcc;
-}
-
-.login-btn {
-  width: 100%;
-  padding: 14px;
-  background: #2c2c2c;
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  font-size: 12px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  cursor: pointer;
-  font-family: 'Georgia', serif;
-  transition: background 0.2s, opacity 0.2s;
-}
-.login-btn:hover:not(:disabled) { background: #444; }
-.login-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-
-.login-footer {
-  margin-top: 24px;
-  font-size: 11px;
-  color: #ccc;
-  text-align: center;
-  font-family: Arial, sans-serif;
-  line-height: 1.6;
-}
-
-/* ════════════════════════════════════
-   APP SHELL  (hidden until logged in)
-════════════════════════════════════ */
-#app-shell {
-  display: none;           /* Firebase onAuthStateChanged will set to flex */
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-}
-
-body {
-  font-family: 'Georgia', serif;
-  background: #f0ede8;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 40px 20px;
-  color: #1a1a1a;
-}
-
-.top-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  max-width: 1320px;
-  margin-bottom: 28px;
-}
-
-h1.app-title {
-  font-size: 11px;
-  letter-spacing: 3px;
-  text-transform: uppercase;
-  color: #999;
-}
-
-.top-bar-right {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-#user-email {
-  font-size: 11px;
-  color: #aaa;
-  font-family: Arial, sans-serif;
-}
-
-.logout-btn {
-  font-size: 10px;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  color: #bbb;
-  background: none;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 6px 14px;
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.2s;
-}
-.logout-btn:hover { color: #555; border-color: #aaa; }
-
-.editor-wrapper {
-  display: flex;
-  gap: 32px;
-  width: 100%;
-  max-width: 1320px;
-  align-items: flex-start;
-}
-
-/* ════════════════════════════════════
-   FORM PANEL
-════════════════════════════════════ */
-.form-panel {
-  width: 340px;
-  flex-shrink: 0;
-  background: #fff;
-  border-radius: 12px;
-  padding: 28px;
-  box-shadow: 0 2px 16px rgba(0,0,0,0.07);
-  position: sticky;
-  top: 40px;
-  max-height: calc(100vh - 80px);
-  overflow-y: auto;
-}
-
-.form-panel::-webkit-scrollbar { width: 4px; }
-.form-panel::-webkit-scrollbar-thumb { background: #ddd; border-radius: 4px; }
-
-.form-panel h2 {
-  font-size: 10px;
-  letter-spacing: 2.5px;
-  text-transform: uppercase;
-  color: #aaa;
-  margin-bottom: 20px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid #eee;
-}
-
-.form-section { margin-bottom: 22px; }
-
-.form-section h3 {
-  font-size: 9px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: #bbb;
-  margin-bottom: 10px;
-}
-
-.form-group { margin-bottom: 9px; }
-
-label {
-  display: block;
-  font-size: 10px;
-  color: #999;
-  margin-bottom: 3px;
-  letter-spacing: 0.4px;
-}
-
-input, textarea, select {
-  width: 100%;
-  border: 1px solid #e8e8e8;
-  border-radius: 6px;
-  padding: 7px 10px;
-  font-size: 12.5px;
-  font-family: inherit;
-  color: #222;
-  background: #fafafa;
-  transition: border-color 0.2s, background 0.2s;
-  outline: none;
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-select {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23999' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  padding-right: 28px;
-  cursor: pointer;
-}
-
-input:focus, textarea:focus, select:focus {
-  border-color: #b5c9b0;
-  background: #fff;
-}
-
-textarea { resize: vertical; min-height: 56px; }
-
-.item-row {
-  background: #f9f9f9;
-  border: 1px solid #eee;
-  border-radius: 8px;
-  padding: 11px;
-  margin-bottom: 9px;
-  position: relative;
-}
-
-.item-row .form-group { margin-bottom: 7px; }
-
-.item-numbers {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 7px;
-}
-
-.remove-item {
-  position: absolute;
-  top: 7px; right: 8px;
-  background: none;
-  border: none;
-  color: #ccc;
-  cursor: pointer;
-  font-size: 17px;
-  line-height: 1;
-  transition: color 0.2s;
-}
-.remove-item:hover { color: #e00; }
-
-.btn-add-item {
-  width: 100%;
-  padding: 8px;
-  border: 1px dashed #c5d4c0;
-  background: none;
-  border-radius: 6px;
-  font-size: 11.5px;
-  color: #7a9e75;
-  cursor: pointer;
-  transition: all 0.2s;
-  font-family: inherit;
-}
-.btn-add-item:hover { background: #f0f5ef; border-color: #7a9e75; }
-
-.btn-generate {
-  width: 100%;
-  padding: 13px;
-  background: #2c2c2c;
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  font-size: 12px;
-  letter-spacing: 1.8px;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: background 0.2s;
-  margin-top: 6px;
-  font-family: inherit;
-}
-.btn-generate:hover { background: #444; }
-
-/* ════════════════════════════════════
-   PREVIEW PANEL
-════════════════════════════════════ */
-.preview-panel { flex: 1; min-width: 0; }
-
-.preview-label {
-  font-size: 10px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: #bbb;
-  margin-bottom: 12px;
-}
-
-/* ════════════════════════════════════
-   INVOICE DOCUMENT
-════════════════════════════════════ */
-.invoice-preview {
-  background: #fff;
-  width: 100%;
-  max-width: 780px;
-  padding: 56px 60px;
-  box-shadow: 0 4px 32px rgba(0,0,0,0.10);
-  border-radius: 3px;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 13px;
-  color: #1a1a1a;
-}
-
-.inv-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 44px;
-}
-
-.inv-title {
-  font-size: 34px;
-  font-weight: 700;
-  color: #1a1a1a;
-  line-height: 1;
-  letter-spacing: -0.5px;
-}
-
-.inv-meta-table { border-collapse: collapse; }
-.inv-meta-table td {
-  padding: 3px 0;
-  font-size: 13px;
-  vertical-align: middle;
-  white-space: nowrap;
-}
-.inv-meta-table .lbl { color: #888; text-align: left; padding-right: 32px; }
-.inv-meta-table .val { color: #1a1a1a; text-align: right; font-weight: 400; min-width: 80px; }
-
-.inv-parties {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 44px;
-  gap: 40px;
-}
-
-.inv-party { flex: 1; }
-.inv-party.right { text-align: right; }
-
-.inv-party h4 {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-  color: #1a1a1a;
-  margin-bottom: 10px;
-}
-
-.inv-party p {
-  font-size: 13px;
-  color: #444;
-  line-height: 1.75;
-}
-
-.inv-table { width: 100%; border-collapse: collapse; }
-.inv-table thead tr { background: #dde8d9; }
-.inv-table th {
-  padding: 11px 14px;
-  font-size: 12.5px;
-  font-weight: 400;
-  color: #444;
-  text-align: left;
-}
-.inv-table th.r, .inv-table td.r { text-align: right; }
-.inv-table tbody tr { border-bottom: 1px solid #ebebeb; }
-.inv-table td {
-  padding: 15px 14px;
-  font-size: 13px;
-  color: #222;
-  vertical-align: top;
-}
-
-.inv-total-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 13px 14px;
-  font-size: 13.5px;
-}
-.inv-total-row.subtotal { background: #dde8d9; color: #333; }
-.inv-total-row.grand {
-  font-size: 17px;
-  font-weight: 700;
-  border-top: 1px solid #c8c8c8;
-  color: #1a1a1a;
-}
-
-.inv-notes {
-  margin-top: 36px;
-  font-size: 11.5px;
-  color: #888;
-  border-top: 1px solid #eee;
-  padding-top: 18px;
-  line-height: 1.65;
-}
-
-@media (max-width: 960px) {
-  .editor-wrapper { flex-direction: column; }
-  .form-panel { width: 100%; position: static; max-height: none; }
-  .invoice-preview { padding: 36px 28px; }
-}
-
-/* ════════════════════════════════════
-   A4 PRINT
-════════════════════════════════════ */
-@media print {
-  @page { size: A4 portrait; margin: 0; }
-  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  body { background: #fff !important; padding: 0 !important; display: block !important; }
-  #login-screen, .top-bar, .form-panel, .preview-label { display: none !important; }
-  .editor-wrapper { display: block !important; max-width: 100% !important; }
-  .preview-panel  { display: block !important; width: 100% !important; }
-  .invoice-preview {
-    width: 210mm !important; min-height: 297mm !important;
-    padding: 18mm 20mm !important; box-shadow: none !important;
-    border-radius: 0 !important; max-width: 100% !important;
-    margin: 0 !important; page-break-after: always;
-  }
-}
-</style>
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
@@ -616,6 +180,18 @@ textarea { resize: vertical; min-height: 56px; }
     <div class="top-bar-right">
       <span id="user-email"></span>
       <button class="logout-btn" onclick="doLogout()">Sign Out</button>
+    </div>
+  </div>
+
+  <!-- ── SAVED INVOICES BAR ── -->
+  <div class="invoices-bar">
+    <div class="invoices-bar-header" onclick="toggleInvoicesPanel()">
+      <span class="invoices-bar-title">Saved Invoices</span>
+      <span id="invoices-badge" class="invoices-badge">0</span>
+      <span id="invoices-toggle-icon" class="invoices-toggle-icon">▾</span>
+    </div>
+    <div class="invoices-list-wrap" id="invoices-list-wrap">
+      <div id="invoices-list"><p class="invoices-empty">Loading…</p></div>
     </div>
   </div>
 
@@ -743,6 +319,7 @@ textarea { resize: vertical; min-height: 56px; }
         </div>
       </div>
 
+      <button class="btn-save"     onclick="saveCurrentInvoice()">⬆&nbsp; Save Invoice</button>
       <button class="btn-generate" onclick="generatePDF()">⬇&nbsp; Download PDF</button>
     </div>
 
@@ -755,203 +332,7 @@ textarea { resize: vertical; min-height: 56px; }
   </div><!-- /editor-wrapper -->
 </div><!-- /app-shell -->
 
-<!-- ════════════════════════════════
-     INVOICE LOGIC  (non-module script so functions are globally available)
-════════════════════════════════ -->
-<script>
-function getCurrencyInfo() {
-  const sel = document.getElementById('currency-select');
-  const opt = sel.options[sel.selectedIndex];
-  return { symbol: opt.dataset.symbol, locale: opt.dataset.locale, code: opt.value };
-}
-
-function formatNum(n, curr) {
-  const noDecimal = ['JPY'].includes(curr.code);
-  return (parseFloat(n) || 0).toLocaleString(curr.locale, {
-    minimumFractionDigits: noDecimal ? 0 : 2,
-    maximumFractionDigits: noDecimal ? 0 : 2,
-  });
-}
-
-function fmtAmount(n, curr) { return `${curr.symbol} ${formatNum(n, curr)}`; }
-
-function getVal(id) { return (document.getElementById(id)?.value || '').trim(); }
-
-function formatDate(d) {
-  if (!d) return '';
-  const [y, m, day] = d.split('-');
-  return `${day}/${m}/${y}`;
-}
-
-function addItem() {
-  const div = document.createElement('div');
-  div.className = 'item-row';
-  div.innerHTML = `
-    <button class="remove-item" onclick="removeItem(this)" title="Remove">×</button>
-    <div class="form-group">
-      <label>Description</label>
-      <input type="text" class="item-desc-input" placeholder="Service or product description" oninput="updatePreview()">
-    </div>
-    <div class="item-numbers">
-      <div class="form-group">
-        <label>Qty</label>
-        <input type="number" class="item-qty" value="1" min="1" step="1" oninput="updatePreview()">
-      </div>
-      <div class="form-group">
-        <label>Unit Price</label>
-        <input type="number" class="item-price" value="0" min="0" step="0.01" oninput="updatePreview()">
-      </div>
-    </div>`;
-  document.getElementById('items-container').appendChild(div);
-  updatePreview();
-}
-
-function removeItem(btn) {
-  if (document.querySelectorAll('.item-row').length === 1) return;
-  btn.closest('.item-row').remove();
-  updatePreview();
-}
-
-function getItems() {
-  return Array.from(document.querySelectorAll('.item-row')).map(row => ({
-    desc:  row.querySelector('.item-desc-input')?.value || '',
-    qty:   parseFloat(row.querySelector('.item-qty')?.value  || 1),
-    price: parseFloat(row.querySelector('.item-price')?.value || 0),
-  }));
-}
-
-function updatePreview() {
-  const curr  = getCurrencyInfo();
-  const items = getItems();
-  const total = items.reduce((s, i) => s + i.qty * i.price, 0);
-  const notes = getVal('inv-notes');
-
-  const rows = items.map(i => `
-    <tr>
-      <td>${i.desc || '—'}</td>
-      <td class="r">${i.qty}</td>
-      <td class="r">${fmtAmount(i.price, curr)}</td>
-      <td class="r"><strong>${fmtAmount(i.qty * i.price, curr)}</strong></td>
-    </tr>`).join('');
-
-  document.getElementById('invoice-preview').innerHTML = `
-    <div class="inv-header">
-      <div class="inv-title">Invoice</div>
-      <table class="inv-meta-table">
-        <tr><td class="lbl">Invoice No.</td><td class="val">${getVal('inv-number')}</td></tr>
-        <tr><td class="lbl">Date</td><td class="val">${formatDate(getVal('inv-date'))}</td></tr>
-      </table>
-    </div>
-    <div class="inv-parties">
-      <div class="inv-party">
-        <h4>Issuer</h4>
-        <p><strong>${getVal('issuer-name')}</strong><br>${getVal('issuer-tax')}<br>
-           ${getVal('issuer-address').replace(/\n/g,'<br>')}<br>
-           ${getVal('issuer-email')}<br>${getVal('issuer-phone')}</p>
-      </div>
-      <div class="inv-party right">
-        <h4>Recipient</h4>
-        <p><strong>${getVal('recipient-name')}</strong><br>${getVal('recipient-tax')}<br>
-           ${getVal('recipient-address').replace(/\n/g,'<br>')}<br>
-           ${getVal('recipient-email')}<br>${getVal('recipient-phone')}</p>
-      </div>
-    </div>
-    <table class="inv-table">
-      <thead><tr>
-        <th>Description</th><th class="r">Quantity</th>
-        <th class="r">Unit Price</th><th class="r">Total</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div class="inv-total-row subtotal">
-      <span><strong>Subtotal</strong></span>
-      <span><strong>${fmtAmount(total, curr)}</strong></span>
-    </div>
-    <div class="inv-total-row grand">
-      <span>Total</span><span>${fmtAmount(total, curr)}</span>
-    </div>
-    ${notes ? `<div class="inv-notes">${notes.replace(/\n/g,'<br>')}</div>` : ''}
-  `;
-}
-
-async function generatePDF() {
-  const { jsPDF } = window.jspdf;
-  const doc   = new jsPDF({ unit: 'mm', format: 'a4' });
-  const curr  = getCurrencyInfo();
-  const items = getItems();
-  const total = items.reduce((s, i) => s + i.qty * i.price, 0);
-  const pageW = doc.internal.pageSize.getWidth();
-  const L = 18, R = pageW - 18;
-  let y = 22;
-
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(26); doc.setTextColor(26, 26, 26);
-  doc.text('Invoice', L, y + 4);
-
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
-  doc.setTextColor(130, 130, 130);
-  doc.text('Invoice No.', pageW - 72, y);
-  doc.text('Date',        pageW - 72, y + 7);
-  doc.setTextColor(26, 26, 26);
-  doc.text(getVal('inv-number'),           R, y,     { align: 'right' });
-  doc.text(formatDate(getVal('inv-date')), R, y + 7, { align: 'right' });
-
-  y += 22;
-  doc.setDrawColor(220,220,220); doc.setLineWidth(0.2); doc.line(L, y, R, y);
-  y += 10;
-
-  const iL = [getVal('issuer-name'), getVal('issuer-tax'), ...getVal('issuer-address').split('\n'),
-              getVal('issuer-email'), getVal('issuer-phone')].filter(Boolean);
-  const rL = [getVal('recipient-name'), getVal('recipient-tax'), ...getVal('recipient-address').split('\n'),
-              getVal('recipient-email'), getVal('recipient-phone')].filter(Boolean);
-  const mid = pageW / 2 + 8;
-
-  doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.setTextColor(26,26,26);
-  doc.text('ISSUER', L, y); doc.text('RECIPIENT', mid, y); y += 5;
-  doc.setFontSize(9.5);
-  iL.forEach((l,i) => { doc.setFont('helvetica', i===0?'bold':'normal'); doc.setTextColor(60,60,60); doc.text(l, L, y+i*5.8); });
-  rL.forEach((l,i) => { doc.setFont('helvetica', i===0?'bold':'normal'); doc.setTextColor(60,60,60); doc.text(l, mid, y+i*5.8); });
-  y += Math.max(iL.length, rL.length) * 5.8 + 12;
-
-  doc.autoTable({
-    startY: y,
-    head: [['Description','Quantity','Unit Price','Total']],
-    body: items.map(i => [i.desc, String(i.qty), fmtAmount(i.price,curr), fmtAmount(i.qty*i.price,curr)]),
-    margin: { left: L, right: 18 },
-    headStyles: { fillColor:[210,224,206], textColor:[60,60,60], fontStyle:'normal', fontSize:9.5 },
-    bodyStyles: { textColor:[40,40,40], fontSize:9.5 },
-    columnStyles: { 0:{cellWidth:'auto'}, 1:{halign:'right'}, 2:{halign:'right'}, 3:{halign:'right',fontStyle:'bold'} },
-    alternateRowStyles: { fillColor:[255,255,255] },
-    tableLineColor:[220,220,220], tableLineWidth:0.1,
-  });
-
-  y = doc.lastAutoTable.finalY;
-  doc.setFillColor(210,224,206); doc.rect(L,y,R-L,10,'F');
-  doc.setFont('helvetica','bold'); doc.setFontSize(10.5); doc.setTextColor(40,40,40);
-  doc.text('Subtotal', L+4, y+7); doc.text(fmtAmount(total,curr), R-2, y+7, {align:'right'});
-  y += 10;
-
-  doc.setDrawColor(200,200,200); doc.setLineWidth(0.3); doc.line(L,y,R,y); y += 1;
-  doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(26,26,26);
-  doc.text('Total', L+4, y+9); doc.text(fmtAmount(total,curr), R-2, y+9, {align:'right'});
-
-  const notes = getVal('inv-notes');
-  if (notes) {
-    y += 20;
-    doc.setDrawColor(220,220,220); doc.setLineWidth(0.2); doc.line(L,y,R,y); y += 7;
-    doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(130,130,130);
-    doc.text(doc.splitTextToSize(notes, R-L), L, y);
-  }
-
-  doc.save(`Invoice-${getVal('inv-number')}.pdf`);
-}
-
-document.querySelectorAll('input, textarea, select').forEach(el => {
-  el.addEventListener('input',  updatePreview);
-  el.addEventListener('change', updatePreview);
-});
-
-updatePreview();
-</script>
+<script src="app.js"></script>
 
 </body>
 </html>
