@@ -195,7 +195,8 @@ updatePreview();
    INVOICE MANAGEMENT
 ════════════════════════════════════ */
 
-let _savedInvoices = [];
+let _savedInvoices   = [];
+let _isLoadedInvoice = false;
 
 function escHtml(s) {
   return String(s || '')
@@ -226,7 +227,15 @@ function getFormData() {
   };
 }
 
+function setNextInvoiceNumber(invoices) {
+  const nums = invoices.map(inv => parseInt(inv.invNumber, 10)).filter(n => !isNaN(n));
+  const next = nums.length ? Math.max(...nums) + 1 : 1001;
+  document.getElementById('inv-number').value = String(next);
+  updatePreview();
+}
+
 function loadInvoiceIntoForm(data) {
+  _isLoadedInvoice = true;
   document.getElementById('inv-number').value = data.invNumber || '';
   document.getElementById('inv-date').value   = data.invDate   || '';
 
@@ -283,6 +292,8 @@ function renderInvoicesList(invoices) {
 
   badge.textContent = invoices.length;
 
+  if (!_isLoadedInvoice) setNextInvoiceNumber(invoices);
+
   if (!invoices.length) {
     list.innerHTML = '<p class="invoices-empty">No saved invoices yet.</p>';
     return;
@@ -309,6 +320,7 @@ async function saveCurrentInvoice() {
   btn.disabled    = true;
   btn.textContent = 'Saving…';
   try {
+    _isLoadedInvoice = false;
     await window.saveInvoice(getFormData());
     btn.textContent = 'Saved ✓';
   } catch(e) {
