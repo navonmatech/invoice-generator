@@ -33,11 +33,11 @@ function addItem() {
     </div>
     <div class="item-numbers">
       <div class="form-group">
-        <label>Qty</label>
+        <label>Hours</label>
         <input type="number" class="item-qty" value="1" min="1" step="1" oninput="updatePreview()">
       </div>
       <div class="form-group">
-        <label>Unit Price</label>
+        <label>Price Per Hour</label>
         <input type="number" class="item-price" value="0" min="0" step="0.01" oninput="updatePreview()">
       </div>
     </div>`;
@@ -97,8 +97,8 @@ function updatePreview() {
     </div>
     <table class="inv-table">
       <thead><tr>
-        <th>Description</th><th class="r">Quantity</th>
-        <th class="r">Unit Price</th><th class="r">Total</th>
+        <th>Description</th><th class="r">Hours</th>
+        <th class="r">Price Per Hour</th><th class="r">Total</th>
       </tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -153,7 +153,7 @@ async function generatePDF() {
 
   doc.autoTable({
     startY: y,
-    head: [['Description','Quantity','Unit Price','Total']],
+    head: [['Description','Hours','Price Per Hour','Total']],
     body: items.map(i => [i.desc, String(i.qty), fmtAmount(i.price,curr), fmtAmount(i.qty*i.price,curr)]),
     margin: { left: L, right: 18 },
     headStyles: { fillColor:[210,224,206], textColor:[60,60,60], fontStyle:'normal', fontSize:9.5 },
@@ -284,6 +284,12 @@ function loadInvoiceIntoForm(data) {
   updatePreview();
 }
 
+function fmtTimestamp(ts) {
+  if (!ts) return '—';
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
 function renderInvoicesList(invoices) {
   _savedInvoices = invoices;
   const list  = document.getElementById('invoices-list');
@@ -304,8 +310,12 @@ function renderInvoicesList(invoices) {
       <div class="invoice-row-info">
         <span class="invoice-row-num">#${escHtml(inv.invNumber)}</span>
         <span class="invoice-row-recipient">${escHtml(inv.recipientName)}</span>
-        <span class="invoice-row-date">${inv.invDate ? formatDate(inv.invDate) : '—'}</span>
         <span class="invoice-row-total">${escHtml(inv.currencySymbol)} ${(inv.total || 0).toLocaleString()}</span>
+        <span class="invoice-row-meta">
+          <span class="invoice-row-meta-item">Invoice: ${inv.invDate ? formatDate(inv.invDate) : '—'}</span>
+          <span class="invoice-row-meta-item">Created: ${fmtTimestamp(inv.created_at)}</span>
+          <span class="invoice-row-meta-item">Updated: ${fmtTimestamp(inv.updated_at)}</span>
+        </span>
       </div>
       <div class="invoice-row-actions">
         <button class="btn-load-inv" onclick="loadInvoiceIntoForm(_savedInvoices[${idx}])">Load</button>

@@ -536,9 +536,19 @@ textarea { resize: vertical; min-height: 56px; }
 }
 
 .invoice-row-num       { font-weight: 700; color: #333; white-space: nowrap; }
-.invoice-row-recipient { color: #555; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.invoice-row-date      { color: #aaa; white-space: nowrap; }
+.invoice-row-recipient { color: #555; white-space: nowrap; }
 .invoice-row-total     { color: #2c2c2c; font-weight: 600; white-space: nowrap; }
+
+.invoice-row-meta {
+  display: flex;
+  gap: 14px;
+  flex: 1;
+}
+.invoice-row-meta-item {
+  font-size: 11px;
+  color: #aaa;
+  white-space: nowrap;
+}
 
 .invoice-row-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
